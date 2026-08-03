@@ -87,8 +87,10 @@ class SheetsSyncManager:
                 sheet.insert_row(HEADERS, 1)
 
             existing = sheet.get_all_values()
-            if not existing:
-                sheet.insert_row(HEADERS, 1)
+            non_empty_count = len([r for r in existing if any(str(cell).strip() for cell in r)])
+            if non_empty_count == 0:
+                sheet.insert_row(HEADERS, 1, value_input_option="USER_ENTERED")
+                non_empty_count = 1
 
             row = [
                 report.get("id", ""),
@@ -105,7 +107,8 @@ class SheetsSyncManager:
                 report.get("username", ""),
                 report.get("created_at", "")
             ]
-            sheet.append_row(row)
-            logger.info(f"Bike report #{report.get('id')} appended to Google Sheets ('{sheet.title}').")
+            next_row = non_empty_count + 1
+            sheet.insert_row(row, next_row, value_input_option="USER_ENTERED")
+            logger.info(f"Bike report #{report.get('id')} appended to Google Sheets ('{sheet.title}') at row {next_row}.")
         except Exception as e:
             logger.error(f"Error appending report #{report.get('id')} to Google Sheets: {e}")

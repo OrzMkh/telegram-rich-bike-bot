@@ -10,8 +10,8 @@ from telegram.ext import (
 )
 
 from config import ADMIN_IDS, DB_PATH
-from bot.handlers import get_main_keyboard
-from db.database import (
+from handlers import get_main_keyboard
+from database import (
     is_user_admin,
     get_all_cities,
     add_city,

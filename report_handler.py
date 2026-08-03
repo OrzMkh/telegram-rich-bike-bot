@@ -14,7 +14,7 @@ import urllib.request
 import urllib.parse
 import json
 
-from db.database import (
+from database import (
     add_bike_report,
     get_bike_reports,
     get_all_cities,
@@ -22,8 +22,8 @@ from db.database import (
     is_user_authorized,
 )
 from config import DB_PATH, ADMIN_IDS, GROUP_CHAT_IDS
-from bot.handlers import get_main_keyboard
-from bot.i18n import t, LANG_RU, LANG_UZ, get_date_keyboard_buttons, get_step_nav_buttons
+from handlers import get_main_keyboard
+from i18n import t, LANG_RU, LANG_UZ, get_date_keyboard_buttons, get_step_nav_buttons
 
 logger = logging.getLogger(__name__)
 

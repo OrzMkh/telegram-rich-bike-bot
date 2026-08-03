@@ -2,7 +2,7 @@ import logging
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 from config import DB_PATH, ADMIN_IDS
-from db.database import is_user_admin
+from database import is_user_admin
 
 logger = logging.getLogger(__name__)
 

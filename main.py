@@ -7,14 +7,14 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram.ext import ApplicationBuilder, CommandHandler, PrefixHandler
 
 from config import BOT_TOKEN, DB_PATH
-from db.database import init_db
-from db.sheets_sync import SheetsSyncManager
-from bot.handlers import start_handler, help_handler
-from bot.report_handler import (
+from database import init_db
+from sheets_sync import SheetsSyncManager
+from handlers import start_handler, help_handler
+from report_handler import (
     bike_report_conversation_handler,
     list_reports_handler,
 )
-from bot.admin_handler import admin_conversation_handler
+from admin_handler import admin_conversation_handler
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -94,7 +94,7 @@ def main():
 
     # 5. Register Command Handlers
     from telegram.ext import MessageHandler, filters
-    from bot.report_handler import cancel_report, start_report
+    from report_handler import cancel_report, start_report
     application.add_handler(MessageHandler(filters.Regex(r"(?i)(bekor|отмен|cancel)"), cancel_report))
     application.add_handler(MessageHandler(filters.Regex(r"(?i)(qaytadan|заново)"), start_report))
 

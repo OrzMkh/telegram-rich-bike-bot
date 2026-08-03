@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID", "").strip()
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID", "1Oskxt5oHfO50PDn47I_7rbn4KGfEoy_JcVsn3mBIiyw").strip()
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.json").strip()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DB = os.path.join(BASE_DIR, "bike_reports.db")

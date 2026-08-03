@@ -42,7 +42,12 @@ class SheetsSyncManager:
             creds_json_env = os.getenv("GOOGLE_CREDENTIALS_JSON")
             if creds_json_env:
                 try:
-                    info = json.loads(creds_json_env)
+                    s_clean = creds_json_env.strip()
+                    if (s_clean.startswith("'") and s_clean.endswith("'")) or (s_clean.startswith('"') and s_clean.endswith('"')):
+                        s_clean = s_clean[1:-1].strip()
+                    info = json.loads(s_clean)
+                    if isinstance(info.get("private_key"), str):
+                        info["private_key"] = info["private_key"].replace("\\n", "\n")
                     creds = Credentials.from_service_account_info(info, scopes=scopes)
                     logger.info("Loaded Google credentials from GOOGLE_CREDENTIALS_JSON env var.")
                 except Exception as e:
@@ -70,23 +75,15 @@ class SheetsSyncManager:
             spreadsheet = self.client.open_by_key(self.spreadsheet_id)
             city_name = report.get("city", "").strip()
 
+            target_name = f"Байки {city_name}" if city_name and city_name != "-" else "Байки"
             sheet = None
-            target_names = []
-            if city_name and city_name != "-":
-                target_names.append(f"Байки {city_name}")
-                target_names.append(city_name)
-            target_names.append("Байки")
-
-            for name in target_names:
-                try:
-                    sheet = spreadsheet.worksheet(name)
-                    break
-                except Exception:
-                    continue
+            try:
+                sheet = spreadsheet.worksheet(target_name)
+            except Exception:
+                pass
 
             if not sheet:
-                new_sheet_name = f"Байки {city_name}" if city_name and city_name != "-" else "Байки"
-                sheet = spreadsheet.add_worksheet(title=new_sheet_name, rows=1000, cols=20)
+                sheet = spreadsheet.add_worksheet(title=target_name, rows=1000, cols=20)
                 sheet.insert_row(HEADERS, 1)
 
             existing = sheet.get_all_values()

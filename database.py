@@ -76,12 +76,12 @@ def init_db(db_path="bike_reports.db"):
         conn.commit()
 
     # Pre-populate default cities from Google Sheet tabs if missing
-    default_cities = ["Ташкент", "Самарканд", "Фергана", "Андижан", "Коканд", "Наманган"]
-    for c in default_cities:
-        add_city(c, has_bike_types=1, db_path=db_path)
+    default_cities = [("Ташкент", 80), ("Самарканд", 80), ("Фергана", 80), ("Андижан", 80), ("Коканд", 80), ("Наманган", 80), ("Бухара", 30)]
+    for c_name, c_bikes in default_cities:
+        add_city(c_name, has_bike_types=1, total_bikes=c_bikes, db_path=db_path)
 
 # --- Cities Management ---
-def add_city(name: str, has_bike_types: int = 1, db_path="bike_reports.db") -> bool:
+def add_city(name: str, has_bike_types: int = 1, total_bikes: int = 80, db_path="bike_reports.db") -> bool:
     name = name.strip()
     if not name:
         return False
@@ -89,7 +89,7 @@ def add_city(name: str, has_bike_types: int = 1, db_path="bike_reports.db") -> b
         cursor = conn.cursor()
         try:
             now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cursor.execute("INSERT INTO cities (name, has_bike_types, created_at) VALUES (?, ?, ?)", (name, has_bike_types, now))
+            cursor.execute("INSERT INTO cities (name, has_bike_types, total_bikes, created_at) VALUES (?, ?, ?, ?)", (name, has_bike_types, total_bikes, now))
             conn.commit()
             return True
         except sqlite3.IntegrityError:

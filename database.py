@@ -76,24 +76,38 @@ def init_db(db_path="bike_reports.db"):
         conn.commit()
 
     # Pre-populate default cities from Google Sheet tabs if missing
-    default_cities = [("Ташкент", 80), ("Самарканд", 80), ("Фергана", 80), ("Андижан", 80), ("Коканд", 80), ("Наманган", 80), ("Бухара", 30)]
-    for c_name, c_bikes in default_cities:
-        add_city(c_name, has_bike_types=1, total_bikes=c_bikes, db_path=db_path)
+    default_cities = [
+        ("Ташкент", 1670, 0),
+        ("Самарканд", 200, 0),
+        ("Фергана", 80, 0),
+        ("Андижан", 50, 0),
+        ("Бухара", 30, 0),
+        ("Навои", 30, 0),
+        ("Карши", 30, 0),
+        ("Ургенч", 30, 0),
+        ("Нукус", 30, 0),
+        ("Коканд", 25, 0),
+        ("Наманган", 25, 0),
+    ]
+    for c_name, c_bikes, c_types in default_cities:
+        add_city(c_name, has_bike_types=c_types, total_bikes=c_bikes, db_path=db_path)
 
 # --- Cities Management ---
-def add_city(name: str, has_bike_types: int = 1, total_bikes: int = 80, db_path="bike_reports.db") -> bool:
+def add_city(name: str, has_bike_types: int = 0, total_bikes: int = 80, db_path="bike_reports.db") -> bool:
     name = name.strip()
     if not name:
         return False
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
-        try:
-            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("SELECT id FROM cities WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        if row:
+            cursor.execute("UPDATE cities SET total_bikes = ?, has_bike_types = ? WHERE id = ?", (total_bikes, has_bike_types, row["id"]))
+        else:
             cursor.execute("INSERT INTO cities (name, has_bike_types, total_bikes, created_at) VALUES (?, ?, ?, ?)", (name, has_bike_types, total_bikes, now))
-            conn.commit()
-            return True
-        except sqlite3.IntegrityError:
-            return False
+        conn.commit()
+        return True
 
 def toggle_city_bike_types(city_id: int, db_path="bike_reports.db") -> bool:
     with get_connection(db_path) as conn:

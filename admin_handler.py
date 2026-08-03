@@ -242,4 +242,5 @@ admin_conversation_handler = ConversationHandler(
     fallbacks=[
         CommandHandler("admin", admin_start),
     ],
+    allow_reentry=True,
 )

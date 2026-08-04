@@ -4,18 +4,17 @@ import sys
 import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, PrefixHandler
 
-from config import BOT_TOKEN, DB_PATH, CITY
+from config import BOT_TOKEN, DB_PATH
 from database import init_db
 from sheets_sync import SheetsSyncManager
-from rich_report_handler import (
-    rich_report_conversation_handler,
+from handlers import start_handler, help_handler
+from report_handler import (
+    bike_report_conversation_handler,
     list_reports_handler,
-    start_report,
-    cancel_report,
 )
+from admin_handler import admin_conversation_handler
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -26,25 +25,20 @@ logger = logging.getLogger(__name__)
 async def post_init(application):
     try:
         await application.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Cleared webhooks for clean Rich Bot polling.")
+        logger.info("Cleared existing webhooks for clean polling.")
     except Exception as e:
         logger.warning(f"Could not clear webhook: {e}")
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
-    def end_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-        super().end_headers()
-
     def do_GET(self):
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write(f"OK - Rich Bike Bot ({CITY}) is running".encode("utf-8"))
+        self.wfile.write(b"OK - Bike Report Bot is running")
 
     def do_HEAD(self):
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
 
     def log_message(self, format, *args):
@@ -60,33 +54,31 @@ def start_health_server():
     except Exception as e:
         logger.error(f"Failed to start health check server on port {port}: {e}")
 
-async def start_handler(update: Update, context):
-    user = update.effective_user
-    name = user.first_name if user else "Партнёр"
-    welcome_text = (
-        f"💎 **Бот отчётов Rich Гибриды ({CITY})**\n\n"
-        f"Здравствуйте, **{name}**!\n"
-        f"Этот бот предназначен для заполнения и учёта отчётов по **гибридам Rich** в городе {CITY}.\n\n"
-        f"📌 **Доступные команды:**\n"
-        f"• `/report` — Заполнить новый отчёт по гибридам Rich\n"
-        f"• `/reports` — Просмотреть последние отчёты\n"
-        f"• `/cancel` — Отменить заполнение отчёта\n\n"
-        f"👇 Для начала заполнения отправьте `/report` или словесный запрос (например: *отчёт*):"
-    )
-    await update.message.reply_text(welcome_text, parse_mode="Markdown")
+async def group_id_handler(update, context):
+    chat = update.effective_chat
+    if chat:
+        await update.message.reply_text(
+            f"📌 **ID этой группы:** `{chat.id}`\n\n"
+            f"Чтобы бот отправлял отчёты сюда, укажите этот ID в `.env`:\n`GROUP_CHAT_ID={chat.id}`",
+            parse_mode="Markdown"
+        )
 
 def main():
     threading.Thread(target=start_health_server, daemon=True).start()
 
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN is missing!")
+    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+        logger.error("BOT_TOKEN is not configured in environment or .env file!")
+        print("\n[!] ERROR: BOT_TOKEN is missing. Please set BOT_TOKEN in your .env file.\n")
         sys.exit(1)
 
+    # 1. Initialize SQLite Database
     init_db(DB_PATH)
     logger.info(f"Initialized SQLite database at '{DB_PATH}'.")
 
+    # 2. Initialize Google Sheets Sync
     sheets_sync = SheetsSyncManager()
 
+    # 3. Build Telegram Bot Application
     application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
@@ -96,15 +88,34 @@ def main():
 
     application.bot_data["sheets_sync"] = sheets_sync
 
-    application.add_handler(CommandHandler("start", start_handler))
-    application.add_handler(CommandHandler("reports", list_reports_handler))
-    application.add_handler(rich_report_conversation_handler)
+    # 4. Register Conversation Handlers
+    application.add_handler(admin_conversation_handler)
+    application.add_handler(bike_report_conversation_handler)
 
+    # 5. Register Command Handlers
+    from telegram.ext import MessageHandler, filters
+    from report_handler import cancel_report, start_report
     application.add_handler(MessageHandler(filters.Regex(r"(?i)(bekor|отмен|cancel)"), cancel_report))
     application.add_handler(MessageHandler(filters.Regex(r"(?i)(qaytadan|заново)"), start_report))
 
-    logger.info(f"Rich Bike Bot ({CITY}) started. Listening for updates...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    application.add_handler(PrefixHandler("/", ["start"], start_handler))
+    application.add_handler(PrefixHandler("/", ["help"], help_handler))
+    application.add_handler(PrefixHandler("/", ["reports", "отчеты", "отчёты"], list_reports_handler))
+    application.add_handler(CommandHandler("group_id", group_id_handler))
+
+    # 6. Run Bot
+    logger.info("Telegram Bike Report Bot started. Polling for updates...")
+    try:
+        application.run_polling(drop_pending_updates=True)
+    except Exception as e:
+        if "Conflict" in str(e):
+            logger.error("=========================================================================")
+            logger.error(" ОШИБКА КОНФЛИКТА (telegram.error.Conflict):")
+            logger.error(" С этим BOT_TOKEN одновременно запущена ДРУГАЯ копия бота!")
+            logger.error(" Остановите запущенную копию или измените BOT_TOKEN в файле .env.")
+            logger.error("=========================================================================")
+        else:
+            logger.error(f"Bot execution error: {e}")
 
 if __name__ == "__main__":
     main()

@@ -14,5 +14,5 @@ DB_PATH = os.getenv("DB_PATH", DEFAULT_DB).strip()
 raw_admins = os.getenv("ADMIN_IDS", "").strip()
 ADMIN_IDS = [a.strip() for a in raw_admins.split(",") if a.strip()]
 
-raw_groups = os.getenv("GROUP_CHAT_ID", "-1002638798110").strip()
+raw_groups = os.getenv("GROUP_CHAT_ID", "-4851152519").strip()
 GROUP_CHAT_IDS = [g.strip() for g in raw_groups.split(",") if g.strip()]

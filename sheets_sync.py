@@ -73,18 +73,23 @@ class SheetsSyncManager:
             return
         try:
             spreadsheet = self.client.open_by_key(self.spreadsheet_id)
-            city_name = report.get("city", "").strip()
-
-            target_name = f"Байки {city_name}" if city_name and city_name != "-" else "Байки"
+            city_name = report.get("city", "Ташкент").strip()
+            target_name = f"Rich {city_name}"
             sheet = None
             try:
                 sheet = spreadsheet.worksheet(target_name)
             except Exception:
-                pass
+                try:
+                    sheet = spreadsheet.worksheet("Rich Ташкент")
+                except Exception:
+                    try:
+                        sheet = spreadsheet.worksheet("Rich")
+                    except Exception:
+                        pass
 
             if not sheet:
                 sheet = spreadsheet.add_worksheet(title=target_name, rows=1000, cols=20)
-                sheet.insert_row(HEADERS, 1)
+                sheet.insert_row(HEADERS, 1, value_input_option="USER_ENTERED")
 
             existing = sheet.get_all_values()
             non_empty_count = len([r for r in existing if any(str(cell).strip() for cell in r)])

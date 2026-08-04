@@ -21,7 +21,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     help_text = (
         "💎 <b>Бот отчётов Rich Байки (Ташкент)</b>\n\n"
-        "Учёт и ежедневная отчётность по гибридам Rich в городе Ташкент.\n\n"
+        "Учёт и ежедневная отчётность по байкам Rich в городе Ташкент.\n\n"
         "<b>📋 Команды бота:</b>\n"
         "• <code>/report</code> или кнопка ниже — <b>Заполнить отчёт Rich</b>\n"
         "• <code>/reports</code> — <b>Просмотреть историю отчётов</b>\n"

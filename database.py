@@ -77,17 +77,7 @@ def init_db(db_path="bike_reports.db"):
 
     # Pre-populate default cities from Google Sheet tabs if missing
     default_cities = [
-        ("Ташкент", 1670, 0),
-        ("Самарканд", 200, 0),
-        ("Фергана", 80, 0),
-        ("Андижан", 50, 0),
-        ("Бухара", 30, 0),
-        ("Навои", 30, 0),
-        ("Карши", 30, 0),
-        ("Ургенч", 30, 0),
-        ("Нукус", 30, 0),
-        ("Коканд", 25, 0),
-        ("Наманган", 25, 0),
+        ("Ташкент", 50, 0),
     ]
     for c_name, c_bikes, c_types in default_cities:
         add_city(c_name, has_bike_types=c_types, total_bikes=c_bikes, db_path=db_path)

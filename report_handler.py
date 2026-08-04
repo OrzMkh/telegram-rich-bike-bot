@@ -652,12 +652,9 @@ def format_report_text(rep: dict) -> str:
         n_broken = int(re.search(r"\d+", str(broken_bikes)).group(0)) if re.search(r"\d+", str(broken_bikes)) else 0
         n_trip = int(re.search(r"\d+", str(total_in_trip)).group(0)) if re.search(r"\d+", str(total_in_trip)) else 0
 
-        # User's formula: (на линии + сломанные) / всего_байков
-        on_line = n_issued if n_issued > 0 else n_trip
-        total_accounted = on_line + n_broken
-
+        # Formula: (В поездке) / (Всего гибридов в парке) * 100%
         if total_fleet > 0:
-            pct = round((total_accounted / total_fleet) * 100)
+            pct = round((n_trip / total_fleet) * 100)
             share_str = f"{min(pct, 100)}%"
         else:
             share_str = "0%"
@@ -677,9 +674,7 @@ def format_report_text(rep: dict) -> str:
             comment = translate_uz_to_ru(comment)
 
     lines = [
-        f"📋 **Проверьте данные вашего отчёта:**",
-        "",
-        f"**Гибриды Rich {city}**",
+        f"💎 **Отчёт по РИЧ байкам**",
         f"📍  {city}",
         "___________________",
         "",

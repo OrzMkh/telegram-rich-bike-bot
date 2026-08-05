@@ -40,7 +40,8 @@ class BotAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         if path == "/api/users":
-            self._check_auth_and_serve(self._get_users)
+            # GET users - open for master hub (no secret needed for reads)
+            self._get_users()
         elif path == "/health" or path == "/":
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")

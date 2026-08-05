@@ -1,7 +1,8 @@
-import asyncio
+import os
+import json
+import sqlite3
 import logging
 import sys
-import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram.ext import ApplicationBuilder, CommandHandler, PrefixHandler
@@ -22,6 +23,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Shared secret for internal API calls from Master Hub
+INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "master_hub_secret_2025")
+
 async def post_init(application):
     try:
         await application.bot.delete_webhook(drop_pending_updates=True)
@@ -29,12 +33,32 @@ async def post_init(application):
     except Exception as e:
         logger.warning(f"Could not clear webhook: {e}")
 
-class HealthCheckHandler(BaseHTTPRequestHandler):
+
+class BotAPIHandler(BaseHTTPRequestHandler):
+    """HTTP API server that exposes user data to the Master Hub app."""
+
     def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(b"OK - Bike Report Bot is running")
+        path = self.path.split("?")[0]
+        if path == "/api/users":
+            self._check_auth_and_serve(self._get_users)
+        elif path == "/health" or path == "/":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"OK - Rich Bike Bot is running")
+        else:
+            self.send_error(404, "Not Found")
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        if path == "/api/users/toggle_access":
+            self._check_auth_and_serve(self._toggle_access)
+        elif path == "/api/users/change_role":
+            self._check_auth_and_serve(self._change_role)
+        elif path == "/api/users/delete":
+            self._check_auth_and_serve(self._delete_user)
+        else:
+            self.send_error(404, "Not Found")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -44,15 +68,108 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-def start_health_server():
+    def _check_auth_and_serve(self, handler_fn):
+        secret = self.headers.get("X-Internal-Secret", "")
+        if secret != INTERNAL_API_SECRET:
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
+            return
+        handler_fn()
+
+    def _read_json_body(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            return json.loads(body.decode("utf-8")) if body else {}
+        except Exception:
+            return {}
+
+    def _send_json(self, data, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+
+    def _get_users(self):
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute("SELECT user_id, username, full_name, role, is_active FROM users ORDER BY rowid ASC")
+            rows = [dict(r) for r in c.fetchall()]
+            conn.close()
+            self._send_json(rows)
+        except Exception as e:
+            logger.error(f"API get_users error: {e}")
+            self._send_json([], status=500)
+
+    def _toggle_access(self):
+        payload = self._read_json_body()
+        user_id = payload.get("user_id")
+        is_active = payload.get("is_active", 1)
+        if user_id is None:
+            self._send_json({"error": "user_id required"}, status=400)
+            return
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("UPDATE users SET is_active = ? WHERE user_id = ?", (is_active, user_id))
+            conn.commit()
+            conn.close()
+            self._send_json({"status": "ok"})
+        except Exception as e:
+            logger.error(f"API toggle_access error: {e}")
+            self._send_json({"error": str(e)}, status=500)
+
+    def _change_role(self):
+        payload = self._read_json_body()
+        user_id = payload.get("user_id")
+        role = payload.get("role", "partner")
+        if user_id is None or role not in ("admin", "partner"):
+            self._send_json({"error": "Invalid params"}, status=400)
+            return
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("UPDATE users SET role = ?, is_active = 1 WHERE user_id = ?", (role, user_id))
+            conn.commit()
+            conn.close()
+            self._send_json({"status": "ok"})
+        except Exception as e:
+            logger.error(f"API change_role error: {e}")
+            self._send_json({"error": str(e)}, status=500)
+
+    def _delete_user(self):
+        payload = self._read_json_body()
+        user_id = payload.get("user_id")
+        if user_id is None:
+            self._send_json({"error": "user_id required"}, status=400)
+            return
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+            conn.commit()
+            conn.close()
+            self._send_json({"status": "ok"})
+        except Exception as e:
+            logger.error(f"API delete_user error: {e}")
+            self._send_json({"error": str(e)}, status=500)
+
+
+def start_api_server():
     port = int(os.getenv("PORT", "8080"))
     HTTPServer.allow_reuse_address = True
     try:
-        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-        logger.info(f"Health check HTTP server running on port {port}.")
+        server = HTTPServer(("0.0.0.0", port), BotAPIHandler)
+        logger.info(f"Rich Bot API server running on port {port}.")
         server.serve_forever()
     except Exception as e:
-        logger.error(f"Failed to start health check server on port {port}: {e}")
+        logger.error(f"Failed to start API server on port {port}: {e}")
+
 
 async def group_id_handler(update, context):
     chat = update.effective_chat
@@ -63,8 +180,9 @@ async def group_id_handler(update, context):
             parse_mode="Markdown"
         )
 
+
 def main():
-    threading.Thread(target=start_health_server, daemon=True).start()
+    threading.Thread(target=start_api_server, daemon=True).start()
 
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         logger.error("BOT_TOKEN is not configured in environment or .env file!")
@@ -104,7 +222,7 @@ def main():
     application.add_handler(CommandHandler("group_id", group_id_handler))
 
     # 6. Run Bot
-    logger.info("Telegram Bike Report Bot started. Polling for updates...")
+    logger.info("Telegram Rich Bike Report Bot started. Polling for updates...")
     try:
         application.run_polling(drop_pending_updates=True)
     except Exception as e:
@@ -116,6 +234,7 @@ def main():
             logger.error("=========================================================================")
         else:
             logger.error(f"Bot execution error: {e}")
+
 
 if __name__ == "__main__":
     main()

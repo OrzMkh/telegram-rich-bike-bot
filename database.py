@@ -220,6 +220,23 @@ def init_db(db_path="bike_reports.db"):
     for c_name, c_bikes, c_types in default_cities:
         add_city(c_name, has_bike_types=c_types, total_bikes=c_bikes, db_path=db_path)
 
+    # Pre-populate default partners (access to fill reports)
+    default_partners = [
+        6587381849,
+        7792110579,
+        5356085349,
+        5196914934,
+        6435381421,
+        2386988,
+    ]
+    for uid in default_partners:
+        authorize_user(
+            user_id=uid,
+            username=f"user_{uid}",
+            full_name="Партнёр",
+            role="partner",
+            db_path=db_path
+        )
 
 # ─── Cities Management ────────────────────────────────────────────────────────
 

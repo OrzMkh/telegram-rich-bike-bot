@@ -77,7 +77,17 @@ def init_db(db_path="bike_reports.db"):
 
     # Pre-populate default cities from Google Sheet tabs if missing
     default_cities = [
-        ("Ташкент", 50, 0),
+        ("Ташкент", 1670, 0),
+        ("Самарканд", 200, 0),
+        ("Фергана", 80, 0),
+        ("Андижан", 50, 0),
+        ("Бухара", 30, 0),
+        ("Навои", 30, 0),
+        ("Карши", 30, 0),
+        ("Ургенч", 30, 0),
+        ("Нукус", 30, 0),
+        ("Коканд", 25, 0),
+        ("Наманган", 25, 0),
     ]
     for c_name, c_bikes, c_types in default_cities:
         add_city(c_name, has_bike_types=c_types, total_bikes=c_bikes, db_path=db_path)
@@ -167,6 +177,13 @@ def deauthorize_user(user_id: int, db_path="bike_reports.db") -> bool:
         conn.commit()
         return cursor.rowcount > 0
 
+def delete_user(user_id: int, db_path="bike_reports.db") -> bool:
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
 def get_user(user_id: int, db_path="bike_reports.db") -> dict | None:
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
@@ -187,21 +204,18 @@ def is_user_authorized(user_id: int, username: str = None, admin_ids: list = Non
 
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
-        # 2. If no partners are explicitly added to the whitelist, allow by default
-        cursor.execute("SELECT COUNT(*) as cnt FROM users WHERE role = 'partner'")
-        partner_count = cursor.fetchone()["cnt"]
-        if partner_count == 0:
-            return True
-
-        # 3. Otherwise, check if user is in table and active
+        # 2. Check if user is explicitly in table and active
         cursor.execute("SELECT is_active FROM users WHERE user_id = ?", (user_id,))
         row = cursor.fetchone()
         return bool(row and row["is_active"] == 1)
 
-
 def is_user_admin(user_id: int, username: str = None, admin_ids: list = None, db_path="bike_reports.db") -> bool:
+    str_uid = str(user_id)
+    # Default Super Admin ID
+    if str_uid == "509067967":
+        return True
+
     if admin_ids:
-        str_uid = str(user_id)
         str_uname = f"@{username}" if username else ""
         for a in admin_ids:
             clean_a = str(a).strip()
@@ -211,14 +225,6 @@ def is_user_admin(user_id: int, username: str = None, admin_ids: list = None, db
     user = get_user(user_id, db_path=db_path)
     if user:
         return bool(user.get("role") == "admin" and user.get("is_active") == 1)
-
-    # Default: if no admins in users table and no ADMIN_IDS set, first unknown user can access admin until explicit admins added
-    with get_connection(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) as cnt FROM users WHERE role = 'admin' AND is_active = 1")
-        admin_count = cursor.fetchone()["cnt"]
-        if admin_count == 0 and not admin_ids:
-            return True
 
     return False
 

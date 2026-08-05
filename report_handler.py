@@ -644,7 +644,7 @@ def format_report_text(rep: dict) -> str:
     raw_reasons = rep.get("return_reasons", "-")
 
     city_info = get_city_by_name(city, db_path=DB_PATH)
-    total_fleet = city_info.get("total_bikes", 50) if city_info else 50
+    total_fleet = city_info.get("total_bikes", 80) if city_info else 80
     total_bikes_str = str(total_fleet)
 
     try:
@@ -652,9 +652,12 @@ def format_report_text(rep: dict) -> str:
         n_broken = int(re.search(r"\d+", str(broken_bikes)).group(0)) if re.search(r"\d+", str(broken_bikes)) else 0
         n_trip = int(re.search(r"\d+", str(total_in_trip)).group(0)) if re.search(r"\d+", str(total_in_trip)) else 0
 
-        # Formula: (В поездке) / (Всего гибридов в парке) * 100%
+        # User's formula: (на линии + сломанные) / всего_байков
+        on_line = n_issued if n_issued > 0 else n_trip
+        total_accounted = on_line + n_broken
+
         if total_fleet > 0:
-            pct = round((n_trip / total_fleet) * 100)
+            pct = round((total_accounted / total_fleet) * 100)
             share_str = f"{min(pct, 100)}%"
         else:
             share_str = "0%"
@@ -674,7 +677,7 @@ def format_report_text(rep: dict) -> str:
             comment = translate_uz_to_ru(comment)
 
     lines = [
-        f"💎 **Отчёт по РИЧ байкам**",
+        f"**Байки {city}**",
         f"📍  {city}",
         "___________________",
         "",
@@ -704,7 +707,7 @@ def format_report_text(rep: dict) -> str:
         "💬 Комментарий:",
         f"_{comment}_" if comment != "-" else "-",
         "",
-        f"🚲 Всего гибридов: {total_bikes_str}",
+        f"🚲 Всего байков: {total_bikes_str}",
         f"📊 Доля на линии: {share_str}"
     ])
 
@@ -768,19 +771,11 @@ async def confirm_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         target_groups = GROUP_CHAT_IDS or []
         for gid in target_groups:
             try:
-                try:
-                    await context.bot.send_message(
-                        chat_id=gid,
-                        text=f"{final_report_view}\n\n👤 **Отправил:** `{rep['username']}`",
-                        parse_mode="Markdown"
-                    )
-                except Exception as md_err:
-                    logger.warning(f"Markdown send_message failed for group {gid}: {md_err}, retrying plain text...")
-                    clean_text = final_report_view.replace("**", "").replace("_", "").replace("`", "")
-                    await context.bot.send_message(
-                        chat_id=gid,
-                        text=f"{clean_text}\n\n👤 Отправил: {rep['username']}"
-                    )
+                await context.bot.send_message(
+                    chat_id=gid,
+                    text=f"📋 **Новый отчёт «Байки»** (От: {rep['username']})\n\n{final_report_view}",
+                    parse_mode="Markdown"
+                )
                 logger.info(f"Report #{saved_report.get('id')} posted to group {gid}")
             except Exception as e:
                 logger.error(f"Failed to post report to group {gid}: {e}")

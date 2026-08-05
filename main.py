@@ -1,21 +1,14 @@
 import os
-import json
-import sqlite3
-import logging
 import sys
+import logging
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram.ext import ApplicationBuilder, CommandHandler, PrefixHandler
+from dotenv import load_dotenv
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-from config import BOT_TOKEN, DB_PATH
-from database import init_db
-from sheets_sync import SheetsSyncManager
-from handlers import start_handler, help_handler
-from report_handler import (
-    bike_report_conversation_handler,
-    list_reports_handler,
-)
-from admin_handler import admin_conversation_handler
+from server import run_master_server
+
+load_dotenv()
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -23,218 +16,270 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Shared secret for internal API calls from Master Hub
-INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "master_hub_secret_2025")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8951006941:AAH2Wc2j2AH1aCvui1Bflr7puDStzHtwNNI").strip()
 
-async def post_init(application):
+def get_current_web_app_url():
+    load_dotenv(override=True)
+    return os.getenv("WEB_APP_URL", "https://telegram-master-hub-bot.onrender.com").strip()
+
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    name = user.first_name if user else "Администратор"
+    current_url = get_current_web_app_url()
+
+    text = (
+        f"👑 **Единый Центр Управления (Master Hub)**\n\n"
+        f"Здравствуйте, **{name}**!\n"
+        f"Добро пожаловать в единый пульт управления всеми системами и ботами:\n\n"
+        f"• 🛵 **FlitGo Байки** — статистика парка, допуски и отчёты\n"
+        f"• 📋 **FlitGo Задачи** — отслеживание SLA и задач команды\n"
+        f"• 💰 **Налоги & ЗП (ТК РУз)** — расчёт аванса, ЗП и ФОТ по графику\n"
+        f"• ⚙️ **Управление ботами** — подключение и привязка токенов\n"
+        f"• 💎 **Система Rich** — сервисы и аналитика бренда Rich\n\n"
+        f"👇 Нажмите синюю кнопку **«🚀 Открыть Центр Управления»** ниже:"
+    )
+
+    inline_kb = [
+        [InlineKeyboardButton("🌐 Открыть Центр Управления", web_app=WebAppInfo(url=current_url))]
+    ]
+
+    await update.message.reply_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_kb)
+    )
+
+from telegram.ext import CallbackQueryHandler, MessageHandler, filters
+import sqlite3
+
+TASKS_DB_PATH = r"C:\Users\Mujohid\.gemini\antigravity-ide\scratch\telegram-task-manager-bot\tasks.db"
+TARGET_CHAT_ID = "-1002638798110"
+
+async def dispute_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+
+    data = query.data or ""
+    logger.info(f"=== DISPUTE CALLBACK TRIGGERED: {data} from user @{query.from_user.username} ({query.from_user.id}) ===")
+
     try:
-        await application.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Cleared existing webhooks for clean polling.")
+        await query.answer("⚖️ Оспаривание начато!\n\nНапишите в этот чат причину несогласия.", show_alert=True)
     except Exception as e:
-        logger.warning(f"Could not clear webhook: {e}")
+        logger.error(f"Failed to answer callback query: {e}")
 
+    if data.startswith("dispute_task_"):
+        task_id = data.replace("dispute_task_", "")
+        user = query.from_user
+        username = f"@{user.username}" if user.username else user.first_name
 
-class BotAPIHandler(BaseHTTPRequestHandler):
-    """HTTP API server that exposes user data to the Master Hub app."""
+        context.user_data["awaiting_dispute_for_task"] = task_id
 
-    def do_GET(self):
-        path = self.path.split("?")[0]
-        if path == "/api/users":
-            self._check_auth_and_serve(self._get_users)
-        elif path == "/health" or path == "/":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(b"OK - Fleet Bike Bot is running")
-        else:
-            self.send_error(404, "Not Found")
+        chat_id = query.message.chat_id if query.message else int(TARGET_CHAT_ID)
 
-    def do_POST(self):
-        path = self.path.split("?")[0]
-        if path == "/api/users/toggle_access":
-            self._check_auth_and_serve(self._toggle_access)
-        elif path == "/api/users/change_role":
-            self._check_auth_and_serve(self._change_role)
-        elif path == "/api/users/delete":
-            self._check_auth_and_serve(self._delete_user)
-        else:
-            self.send_error(404, "Not Found")
-
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.end_headers()
-
-    def log_message(self, format, *args):
-        pass
-
-    def _check_auth_and_serve(self, handler_fn):
-        secret = self.headers.get("X-Internal-Secret", "")
-        if secret != INTERNAL_API_SECRET:
-            self.send_response(401)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
-            return
-        handler_fn()
-
-    def _read_json_body(self):
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
         try:
-            return json.loads(body.decode("utf-8")) if body else {}
-        except Exception:
-            return {}
-
-    def _send_json(self, data, status=200):
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
-
-    def _get_users(self):
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
-            c.execute("SELECT user_id, username, full_name, role, is_active FROM users ORDER BY rowid ASC")
-            rows = [dict(r) for r in c.fetchall()]
-            conn.close()
-            self._send_json(rows)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⚖️ <b>ОСПАРИВАНИЕ ОЦЕНКИ ЗАДАЧИ #{task_id}</b>\n\n"
+                     f"👤 <b>{username}</b>, напишите прямо следующим сообщением в этот чат причину вашей оценки / несогласия:\n"
+                     f"<i>(Например: Задержка произошла из-за ожидания ответа от курьера...)</i>",
+                parse_mode="HTML"
+            )
+            logger.info(f"Sent dispute prompt for task #{task_id} to chat {chat_id}")
         except Exception as e:
-            logger.error(f"API get_users error: {e}")
-            self._send_json([], status=500)
-
-    def _toggle_access(self):
-        payload = self._read_json_body()
-        user_id = payload.get("user_id")
-        is_active = payload.get("is_active", 1)
-        if user_id is None:
-            self._send_json({"error": "user_id required"}, status=400)
-            return
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("UPDATE users SET is_active = ? WHERE user_id = ?", (is_active, user_id))
-            conn.commit()
-            conn.close()
-            self._send_json({"status": "ok"})
-        except Exception as e:
-            logger.error(f"API toggle_access error: {e}")
-            self._send_json({"error": str(e)}, status=500)
-
-    def _change_role(self):
-        payload = self._read_json_body()
-        user_id = payload.get("user_id")
-        role = payload.get("role", "partner")
-        if user_id is None or role not in ("admin", "partner"):
-            self._send_json({"error": "Invalid params"}, status=400)
-            return
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("UPDATE users SET role = ?, is_active = 1 WHERE user_id = ?", (role, user_id))
-            conn.commit()
-            conn.close()
-            self._send_json({"status": "ok"})
-        except Exception as e:
-            logger.error(f"API change_role error: {e}")
-            self._send_json({"error": str(e)}, status=500)
-
-    def _delete_user(self):
-        payload = self._read_json_body()
-        user_id = payload.get("user_id")
-        if user_id is None:
-            self._send_json({"error": "user_id required"}, status=400)
-            return
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
-            conn.commit()
-            conn.close()
-            self._send_json({"status": "ok"})
-        except Exception as e:
-            logger.error(f"API delete_user error: {e}")
-            self._send_json({"error": str(e)}, status=500)
+            logger.error(f"Failed to send dispute prompt message: {e}")
 
 
-def start_api_server():
-    port = int(os.getenv("PORT", "8080"))
-    HTTPServer.allow_reuse_address = True
+async def dispute_reason_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+
+    awaiting_task_id = context.user_data.get("awaiting_dispute_for_task")
+    if not awaiting_task_id:
+        return
+
+    reason_text = update.message.text.strip()
+    user = update.message.from_user
+    username = f"@{user.username}" if user.username else user.first_name
+
+    context.user_data.pop("awaiting_dispute_for_task", None)
+
     try:
-        server = HTTPServer(("0.0.0.0", port), BotAPIHandler)
-        logger.info(f"Fleet Bot API server running on port {port}.")
-        server.serve_forever()
+        conn = sqlite3.connect(TASKS_DB_PATH)
+        c = conn.cursor()
+        c.execute("UPDATE tasks SET is_disputed = 1, rating_comment = rating_comment || ' [Оспаривание от ' || ? || ': ' || ? || ']' WHERE id = ?", (username, reason_text, awaiting_task_id))
+        conn.commit()
+        conn.close()
     except Exception as e:
-        logger.error(f"Failed to start API server on port {port}: {e}")
+        logger.error(f"Failed to update dispute in DB: {e}")
 
+    await update.message.reply_text(
+        f"✅ <b>АРГУМЕНТ СОХРАНЁН И ОТПРАВЛЕН!</b>\n\n"
+        f"Ваше пояснение по задаче #{awaiting_task_id} передано на пересмотр супервайзеру:\n"
+        f"💬 <i>«{reason_text}»</i>",
+        parse_mode="HTML"
+    )
 
-async def group_id_handler(update, context):
-    chat = update.effective_chat
-    if chat:
-        await update.message.reply_text(
-            f"📌 **ID этой группы:** `{chat.id}`\n\n"
-            f"Чтобы бот отправлял отчёты сюда, укажите этот ID в `.env`:\n`GROUP_CHAT_ID={chat.id}`",
-            parse_mode="Markdown"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+async def set_password_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    username = (user.username or "").lower().replace("@", "").strip()
+
+    if username not in ["orzmkh", "isslamov", "axi0603", "silent_trickster"]:
+        await update.message.reply_text("⛔ У вас нет прав для изменения пароля.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text("🔑 **Использование команды:**\n`/setpassword НОВЫЙ_ПАРОЛЬ`\n\nПример: `/setpassword 9999`", parse_mode="Markdown")
+        return
+
+    new_pwd = args[0].strip()
+    env_path = os.path.join(BASE_DIR, ".env")
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+    new_lines = []
+    pwd_set = False
+    for line in lines:
+        if line.startswith("MASTER_APP_PASSWORD="):
+            new_lines.append(f"MASTER_APP_PASSWORD={new_pwd}\n")
+            pwd_set = True
+        else:
+            new_lines.append(line)
+
+    if not pwd_set:
+        new_lines.append(f"\nMASTER_APP_PASSWORD={new_pwd}\n")
+
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+
+    import server
+    server.MASTER_APP_PASSWORD = new_pwd
+
+    await update.message.reply_text(f"✅ **Пароль успешно обновлён!**\n\n🔑 Новый пароль доступа: `{new_pwd}`", parse_mode="Markdown")
+
+from zoneinfo import ZoneInfo
+import datetime
+
+async def send_daily_10am_tasks_digest(context: ContextTypes.DEFAULT_TYPE):
+    logger.info("Executing daily 10:00 AM tasks digest...")
+    if not os.path.exists(TASKS_DB_PATH):
+        return
+
+    try:
+        conn = sqlite3.connect(TASKS_DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id, task_text, assignee, priority, sla_deadline FROM tasks WHERE status != 'Done' ORDER BY assignee, id ASC")
+        rows = c.fetchall()
+        conn.close()
+
+        if not rows:
+            msg = (
+                "🌅 <b>Утренний отчёт по задачам (10:00 AM)</b>\n\n"
+                "🎉 <b>Отличная работа!</b> На сегодня нет активных задач в работе."
+            )
+        else:
+            tasks_by_assignee = {}
+            for r in rows:
+                tid, text, assignee, priority, sla = r[0], r[1], r[2], r[3], r[4]
+                if assignee not in tasks_by_assignee:
+                    tasks_by_assignee[assignee] = []
+                tasks_by_assignee[assignee].append((tid, text, priority, sla))
+
+            lines = ["🌅 <b>Ежедневный список задач на сегодня (10:00 AM)</b>\n"]
+            for assignee, tasks in tasks_by_assignee.items():
+                lines.append(f"👤 <b>Исполнитель: {assignee}</b> ({len(tasks)} задач)")
+                for tid, text, priority, sla in tasks:
+                    prio_icon = "🔴" if priority == "High" else ("🟡" if priority == "Medium" else "🟢")
+                    lines.append(f"  • #{tid} {prio_icon} <b>{text}</b> (⏱ SLA: {sla})")
+                lines.append("")
+
+            lines.append("🚀 Желаем продуктивного рабочего дня!")
+            msg = "\n".join(lines)
+
+        await context.bot.send_message(
+            chat_id=TARGET_CHAT_ID,
+            text=msg,
+            parse_mode="HTML"
         )
+        logger.info(f"Daily 10:00 AM digest sent to {TARGET_CHAT_ID}")
+    except Exception as e:
+        logger.error(f"Failed to send daily 10am digest: {e}")
 
+async def send_digest_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ Формирование и отправка утренней сводки в группу...")
+    await send_daily_10am_tasks_digest(context)
+
+import asyncio
+
+async def daily_reminder_loop(app):
+    while True:
+        try:
+            tz_tashkent = datetime.timezone(datetime.timedelta(hours=5))
+            now = datetime.datetime.now(tz_tashkent)
+            target = now.replace(hour=10, minute=0, second=0, microsecond=0)
+            if now >= target:
+                target += datetime.timedelta(days=1)
+            
+            seconds_until_target = (target - now).total_seconds()
+            logger.info(f"Daily 10:00 AM reminder loop sleeping for {seconds_until_target:.1f} seconds...")
+            await asyncio.sleep(seconds_until_target)
+
+            class FakeContext:
+                def __init__(self, bot):
+                    self.bot = bot
+            await send_daily_10am_tasks_digest(FakeContext(app.bot))
+        except Exception as e:
+            logger.error(f"Error in daily_reminder_loop: {e}")
+            await asyncio.sleep(60)
+
+from rich_bot import setup_rich_bot_application
+
+def run_rich_bot():
+    try:
+        rich_app = setup_rich_bot_application()
+        logger.info("Rich Hybrid Bot starting polling on token 8803642782...")
+        rich_app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
+    except Exception as e:
+        logger.error(f"Rich Hybrid Bot thread error: {e}")
+
+async def post_init_callback(application):
+    asyncio.create_task(daily_reminder_loop(application))
+    logger.info("Started native daily 10:00 AM asyncio reminder task.")
+    url = get_current_web_app_url()
+    try:
+        from telegram import MenuButtonWebApp, WebAppInfo
+        await application.bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="🚀 Master Hub App", web_app=WebAppInfo(url=url))
+        )
+        logger.info(f"Successfully updated Telegram Menu Button to: {url}")
+    except Exception as e:
+        logger.error(f"Failed to set Telegram Menu Button: {e}")
 
 def main():
-    threading.Thread(target=start_api_server, daemon=True).start()
+    port = int(os.getenv("PORT", "8085"))
+    threading.Thread(target=run_master_server, args=(port,), daemon=True).start()
+    threading.Thread(target=run_rich_bot, daemon=True).start()
 
-    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        logger.error("BOT_TOKEN is not configured in environment or .env file!")
-        print("\n[!] ERROR: BOT_TOKEN is missing. Please set BOT_TOKEN in your .env file.\n")
-        sys.exit(1)
-
-    # 1. Initialize SQLite Database
-    init_db(DB_PATH)
-    logger.info(f"Initialized SQLite database at '{DB_PATH}'.")
-
-    # 2. Initialize Google Sheets Sync
-    sheets_sync = SheetsSyncManager()
-
-    # 3. Build Telegram Bot Application
     application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
-        .post_init(post_init)
+        .post_init(post_init_callback)
         .build()
     )
 
-    application.bot_data["sheets_sync"] = sheets_sync
+    application.add_handler(CommandHandler("start", start_handler))
+    application.add_handler(CommandHandler("setpassword", set_password_handler))
+    application.add_handler(CommandHandler("senddigest", send_digest_command_handler))
+    application.add_handler(CallbackQueryHandler(dispute_callback_handler, pattern="^dispute_task_"))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), dispute_reason_input_handler))
 
-    # 4. Register Conversation Handlers
-    application.add_handler(admin_conversation_handler)
-    application.add_handler(bike_report_conversation_handler)
-
-    # 5. Register Command Handlers
-    from telegram.ext import MessageHandler, filters
-    from report_handler import cancel_report, start_report
-    application.add_handler(MessageHandler(filters.Regex(r"(?i)(bekor|отмен|cancel)"), cancel_report))
-    application.add_handler(MessageHandler(filters.Regex(r"(?i)(qaytadan|заново)"), start_report))
-
-    application.add_handler(PrefixHandler("/", ["start"], start_handler))
-    application.add_handler(PrefixHandler("/", ["help"], help_handler))
-    application.add_handler(PrefixHandler("/", ["reports", "отчеты", "отчёты"], list_reports_handler))
-    application.add_handler(CommandHandler("group_id", group_id_handler))
-
-    # 6. Run Bot
-    logger.info("Telegram Fleet Bike Report Bot started. Polling for updates...")
-    try:
-        application.run_polling(drop_pending_updates=True)
-    except Exception as e:
-        if "Conflict" in str(e):
-            logger.error("=========================================================================")
-            logger.error(" ОШИБКА КОНФЛИКТА (telegram.error.Conflict):")
-            logger.error(" С этим BOT_TOKEN одновременно запущена ДРУГАЯ копия бота!")
-            logger.error(" Остановите запущенную копию или измените BOT_TOKEN в файле .env.")
-            logger.error("=========================================================================")
-        else:
-            logger.error(f"Bot execution error: {e}")
-
+    logger.info("Master Hub Bot started. Listening for commands...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
 
 if __name__ == "__main__":
     main()

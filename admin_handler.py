@@ -21,6 +21,7 @@ from database import (
     get_all_users,
     authorize_user,
     deauthorize_user,
+    delete_user,
     get_bike_reports,
 )
 
@@ -78,6 +79,46 @@ def render_cities_admin_keyboard(cities):
             ])
 
     keyboard.append([InlineKeyboardButton("➕ Добавить новый город", callback_data="admin_add_city")])
+    keyboard.append([InlineKeyboardButton("◀️ В меню", callback_data="admin_menu")])
+    return text, InlineKeyboardMarkup(keyboard)
+
+def render_users_admin_keyboard(users):
+    text = "👥 **Партнёры и Разрешения (Доступы):**\n\n"
+    text += "👑 **Главный суперадмин:** `509067967` (Доступ всегда открыт)\n\n"
+    keyboard = []
+    if not users:
+        text += "Дополнительных пользователей пока нет в базе.\n"
+    else:
+        for u in users:
+            uid = u["user_id"]
+            is_active = u.get("is_active", 1) == 1
+            role = u.get("role", "partner")
+            status_str = "✅ Доступ разрешён" if is_active else "⛔️ Доступ закрыт"
+            role_str = "👑 Админ" if role == "admin" else "👤 Партнёр"
+            name_str = u.get("full_name") or u.get("username") or f"ID {uid}"
+            text += f"• **{name_str}** (`ID: {uid}`) — {role_str} ({status_str})\n"
+
+            if str(uid) == "509067967":
+                continue
+
+            if is_active:
+                if role == "partner":
+                    keyboard.append([
+                        InlineKeyboardButton(f"👑 Повысить до Админа ({uid})", callback_data=f"admin_set_role_{uid}_admin"),
+                        InlineKeyboardButton(f"🚫 Отозвать доступ", callback_data=f"admin_del_user_{uid}")
+                    ])
+                else:
+                    keyboard.append([
+                        InlineKeyboardButton(f"👤 Понизить до Партнёра ({uid})", callback_data=f"admin_set_role_{uid}_partner"),
+                        InlineKeyboardButton(f"🚫 Отозвать доступ", callback_data=f"admin_del_user_{uid}")
+                    ])
+            else:
+                keyboard.append([
+                    InlineKeyboardButton(f"✅ Включить доступ ({uid})", callback_data=f"admin_set_role_{uid}_{role}"),
+                    InlineKeyboardButton(f"🗑 Удалить", callback_data=f"admin_remove_user_{uid}")
+                ])
+
+    keyboard.append([InlineKeyboardButton("➕ Добавить доступ по Telegram ID", callback_data="admin_add_user")])
     keyboard.append([InlineKeyboardButton("◀️ В меню", callback_data="admin_menu")])
     return text, InlineKeyboardMarkup(keyboard)
 
@@ -141,22 +182,8 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     elif data == "admin_users":
         users = get_all_users(db_path=DB_PATH)
-        text = "👥 **Партнёры и Разрешения:**\n\n"
-        keyboard = []
-        if not users:
-            text += "Пока нет настроенных пользователей.\n"
-        else:
-            for u in users:
-                status = "✅ Доступ разрешен" if u["is_active"] == 1 else "⛔️ Доступ закрыт"
-                role_str = "👑 Админ" if u["role"] == "admin" else "👤 Партнер"
-                text += f"• **{u['full_name'] or u['username']}** (`ID: {u['user_id']}`) — {role_str} ({status})\n"
-                if u["is_active"] == 1 and u["role"] != "admin":
-                    keyboard.append([InlineKeyboardButton(f"🚫 Отозвать доступ ID {u['user_id']}", callback_data=f"admin_del_user_{u['user_id']}")])
-
-        keyboard.append([InlineKeyboardButton("➕ Добавить партнёра по ID", callback_data="admin_add_user")])
-        keyboard.append([InlineKeyboardButton("◀️ В меню", callback_data="admin_menu")])
-
-        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        text, reply_markup = render_users_admin_keyboard(users)
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
     elif data == "admin_add_user":
         await query.edit_message_text(
@@ -165,10 +192,24 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
         return WAITING_ADD_USER
 
+    elif data.startswith("admin_set_role_"):
+        parts = data.split("_")
+        if len(parts) >= 5:
+            uid = int(parts[3])
+            role = parts[4]
+            authorize_user(user_id=uid, username=f"User_{uid}", full_name="Пользователь", role=role, db_path=DB_PATH)
+            role_label = "👑 Администратор" if role == "admin" else "👤 Партнёр (Только отчёты)"
+            await query.edit_message_text(f"✅ Доступ для Telegram ID `{uid}` успешно сохранён: **{role_label}**!", parse_mode="Markdown")
+
     elif data.startswith("admin_del_user_"):
         uid = int(data.replace("admin_del_user_", ""))
         deauthorize_user(uid, db_path=DB_PATH)
-        await query.edit_message_text("🚫 Доступ пользователю отозван.")
+        await query.edit_message_text(f"🚫 Доступ для Telegram ID `{uid}` отозван.", parse_mode="Markdown")
+
+    elif data.startswith("admin_remove_user_"):
+        uid = int(data.replace("admin_remove_user_", ""))
+        delete_user(uid, db_path=DB_PATH)
+        await query.edit_message_text(f"🗑 Пользователь ID `{uid}` удалён из базы.", parse_mode="Markdown")
 
     elif data == "admin_reports":
         reports = get_bike_reports(limit=10, db_path=DB_PATH)
@@ -217,16 +258,23 @@ async def handle_city_total_input(update: Update, context: ContextTypes.DEFAULT_
     return ConversationHandler.END
 
 async def handle_user_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user = update.effective_user
-    main_kb = get_main_keyboard(user.id, user.username) if user else None
     input_text = update.message.text.strip()
     if not input_text.isdigit():
-        await update.message.reply_text("⚠️ Пожалуйста, введите числовой Telegram ID пользователя.")
+        await update.message.reply_text("⚠️ Пожалуйста, введите числовой Telegram ID пользователя (например: 123456789).")
         return WAITING_ADD_USER
 
     uid = int(input_text)
-    authorize_user(user_id=uid, username=f"User_{uid}", full_name="Партнёр", role="partner", db_path=DB_PATH)
-    await update.message.reply_text(f"✅ Пользователю с Telegram ID `{uid}` успешно разрешен доступ!", parse_mode="Markdown", reply_markup=main_kb)
+    keyboard = [
+        [InlineKeyboardButton("👑 Выдать доступ АДМИНИСТРАТОРА", callback_data=f"admin_set_role_{uid}_admin")],
+        [InlineKeyboardButton("👤 Выдать доступ ПАРТНЁРА (Только отчёты)", callback_data=f"admin_set_role_{uid}_partner")],
+        [InlineKeyboardButton("◀️ Назад в меню пользователей", callback_data="admin_users")]
+    ]
+    await update.message.reply_text(
+        f"👤 **Пользователь Telegram ID:** `{uid}`\n\n"
+        "Выберите уровень доступа для этого пользователя:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     return ConversationHandler.END
 
 admin_conversation_handler = ConversationHandler(

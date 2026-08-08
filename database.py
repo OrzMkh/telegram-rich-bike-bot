@@ -220,6 +220,15 @@ def init_db(db_path="bike_reports.db"):
     for c_name, c_bikes, c_types in default_cities:
         add_city(c_name, has_bike_types=c_types, total_bikes=c_bikes, db_path=db_path)
 
+    # Force auto-migration if legacy 1670 was saved
+    with get_connection(db_path) as conn:
+        cur = conn.cursor()
+        if USE_POSTGRES:
+            cur._cur.execute("UPDATE cities SET total_bikes = 50 WHERE name = 'Ташкент' AND total_bikes > 500")
+        else:
+            cur.execute("UPDATE cities SET total_bikes = 50 WHERE name = 'Ташкент' AND total_bikes > 500")
+        conn.commit()
+
     # Pre-populate default partners (access to fill reports)
     default_partners = [
         7738498910,

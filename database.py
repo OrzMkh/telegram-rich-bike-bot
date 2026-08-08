@@ -231,7 +231,12 @@ def init_db(db_path="bike_reports.db"):
 
     # Pre-populate default partners (access to fill reports)
     default_partners = [
-        7738498910,
+        6587381849,
+        7792110579,
+        5356085349,
+        5196914934,
+        6435381421,
+        2386988,
     ]
     for uid in default_partners:
         authorize_user(

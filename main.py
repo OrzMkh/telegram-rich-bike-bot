@@ -46,7 +46,7 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"OK - Rich Bike Bot is running")
+            self.wfile.write(b"OK - Fleet Bike Bot is running")
         else:
             self.send_error(404, "Not Found")
 
@@ -166,7 +166,7 @@ def start_api_server():
     HTTPServer.allow_reuse_address = True
     try:
         server = HTTPServer(("0.0.0.0", port), BotAPIHandler)
-        logger.info(f"Rich Bot API server running on port {port}.")
+        logger.info(f"Fleet Bot API server running on port {port}.")
         server.serve_forever()
     except Exception as e:
         logger.error(f"Failed to start API server on port {port}: {e}")
@@ -223,7 +223,7 @@ def main():
     application.add_handler(CommandHandler("group_id", group_id_handler))
 
     # 6. Run Bot
-    logger.info("Telegram Rich Bike Report Bot started. Polling for updates...")
+    logger.info("Telegram Fleet Bike Report Bot started. Polling for updates...")
     try:
         application.run_polling(drop_pending_updates=True)
     except Exception as e:

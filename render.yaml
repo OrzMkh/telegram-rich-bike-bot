@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: telegram-rich-bike-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        value: 8803642782:AAHiSsVxnleQIrOytksRHTVmH_vWWYtcKSg
+      - key: CITY
+        value: Ташкент

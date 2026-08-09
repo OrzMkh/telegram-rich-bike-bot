@@ -349,7 +349,16 @@ def get_city_by_name(name: str, db_path="bike_reports.db"):
         else:
             cursor.execute("SELECT * FROM cities WHERE name = ?", (name.strip(),))
             row = cursor.fetchone()
-        return dict(row) if row else None
+        if row:
+            d = dict(row)
+            if "ташкент" in d.get("name", "").lower() and d.get("total_bikes") != 50:
+                d["total_bikes"] = 50
+                try:
+                    update_city_total_bikes(d.get("id"), 50, db_path=db_path)
+                except Exception:
+                    pass
+            return d
+        return None
 
 
 # ─── Users & Access Management ────────────────────────────────────────────────

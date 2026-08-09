@@ -16,5 +16,5 @@ ADMIN_IDS = [a.strip() for a in raw_admins.split(",") if a.strip()]
 if "509067967" not in ADMIN_IDS:
     ADMIN_IDS.append("509067967")
 
-raw_groups = os.getenv("GROUP_CHAT_ID", "-4946205555,-4573236562").strip()
+raw_groups = os.getenv("GROUP_CHAT_ID", "-4851152519,-1004851152519").strip()
 GROUP_CHAT_IDS = [g.strip() for g in raw_groups.split(",") if g.strip()]

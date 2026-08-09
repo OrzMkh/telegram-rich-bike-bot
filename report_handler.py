@@ -62,7 +62,7 @@ def translate_uz_to_ru(text: str) -> str:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            translated = "".join(part[0] for part[0] in data[0] if part[0])
+            translated = "".join(p[0] for p in data[0] if p and len(p) > 0 and p[0])
             return translated if translated else text_clean
     except Exception as e:
         logger.warning(f"Translation failed for '{text_clean}': {e}")
@@ -644,7 +644,7 @@ def format_report_text(rep: dict) -> str:
     raw_reasons = rep.get("return_reasons", "-")
 
     city_info = get_city_by_name(city, db_path=DB_PATH)
-    total_fleet = city_info.get("total_bikes", 80) if city_info else 80
+    total_fleet = city_info.get("total_bikes", 50) if city_info else 50
     total_bikes_str = str(total_fleet)
 
     try:
@@ -652,8 +652,8 @@ def format_report_text(rep: dict) -> str:
         n_broken = int(re.search(r"\d+", str(broken_bikes)).group(0)) if re.search(r"\d+", str(broken_bikes)) else 0
         n_trip = int(re.search(r"\d+", str(total_in_trip)).group(0)) if re.search(r"\d+", str(total_in_trip)) else 0
 
-        # User's formula: (на линии + сломанные) / всего_байков
-        on_line = n_issued if n_issued > 0 else n_trip
+        # Formula: (байки на линии/в поездке + сломанные) / всего_байков
+        on_line = n_trip if n_trip > 0 else n_issued
         total_accounted = on_line + n_broken
 
         if total_fleet > 0:
@@ -769,16 +769,38 @@ async def confirm_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
         # 3. Post to Telegram Groups if configured
         target_groups = GROUP_CHAT_IDS or []
+        sent_targets = set()
         for gid in target_groups:
+            clean_gid = str(gid).strip()
+            if not clean_gid:
+                continue
+
+            candidates = []
             try:
-                await context.bot.send_message(
-                    chat_id=gid,
-                    text=f"📋 **Новый отчёт «Байки»** (От: {rep['username']})\n\n{final_report_view}",
-                    parse_mode="Markdown"
-                )
-                logger.info(f"Report #{saved_report.get('id')} posted to group {gid}")
-            except Exception as e:
-                logger.error(f"Failed to post report to group {gid}: {e}")
+                candidates.append(int(clean_gid))
+            except ValueError:
+                candidates.append(clean_gid)
+
+            if clean_gid.startswith("-") and not clean_gid.startswith("-100"):
+                try:
+                    candidates.append(int(f"-100{clean_gid[1:]}"))
+                except ValueError:
+                    pass
+
+            for target_chat in candidates:
+                if target_chat in sent_targets:
+                    continue
+                try:
+                    await context.bot.send_message(
+                        chat_id=target_chat,
+                        text=f"📋 **Новый отчёт «Байки Rich»** (От: {rep['username']})\n\n{final_report_view}",
+                        parse_mode="Markdown"
+                    )
+                    logger.info(f"Report #{saved_report.get('id')} posted to group {target_chat}")
+                    sent_targets.add(target_chat)
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to post report to group {target_chat}: {e}")
 
         main_keyboard = get_main_keyboard(user.id, user.username) if user else None
         success_title = f"🎉 **Отчёт «Байки» (ID #{saved_report.get('id')}) успешно отправлен!**\n\n" if lang == "ru" else f"🎉 **\"Bayklar\" hisoboti (ID #{saved_report.get('id')}) muvaffaqiyatli yuborildi!**\n\n"

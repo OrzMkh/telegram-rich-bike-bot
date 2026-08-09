@@ -6,7 +6,7 @@ services:
     startCommand: python main.py
     envVars:
       - key: BOT_TOKEN
-        value: 8803642782:AAHiSsVxnleQIrOytksRHTVmH_vWWYtcKSg
+        sync: false
       - key: CITY
         value: Ташкент
       - key: GROUP_CHAT_ID

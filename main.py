@@ -24,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Shared secret for internal API calls from Master Hub
-INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "master_hub_secret_2025")
+INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 
 async def post_init(application):
     try:

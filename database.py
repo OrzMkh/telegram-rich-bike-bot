@@ -239,13 +239,14 @@ def init_db(db_path="bike_reports.db"):
         2386988,
     ]
     for uid in default_partners:
-        authorize_user(
-            user_id=uid,
-            username=f"user_{uid}",
-            full_name="Партнёр",
-            role="partner",
-            db_path=db_path
-        )
+        if not get_user(uid, db_path=db_path):
+            authorize_user(
+                user_id=uid,
+                username=f"user_{uid}",
+                full_name="Партнёр",
+                role="partner",
+                db_path=db_path
+            )
 
 # ─── Cities Management ────────────────────────────────────────────────────────
 

@@ -652,12 +652,11 @@ def format_report_text(rep: dict) -> str:
         n_broken = int(re.search(r"\d+", str(broken_bikes)).group(0)) if re.search(r"\d+", str(broken_bikes)) else 0
         n_trip = int(re.search(r"\d+", str(total_in_trip)).group(0)) if re.search(r"\d+", str(total_in_trip)) else 0
 
-        # Formula: (байки на линии/в поездке + сломанные) / всего_байков
+        # Formula: В поездке (на линии) / Всего байков
         on_line = n_trip if n_trip > 0 else n_issued
-        total_accounted = on_line + n_broken
 
         if total_fleet > 0:
-            pct = round((total_accounted / total_fleet) * 100)
+            pct = round((on_line / total_fleet) * 100)
             share_str = f"{min(pct, 100)}%"
         else:
             share_str = "0%"
